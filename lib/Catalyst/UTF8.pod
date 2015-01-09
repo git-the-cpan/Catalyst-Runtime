@@ -6,7 +6,7 @@ Catalyst::UTF8 - All About UTF8 and Catalyst Encoding
 
 =head1 Description
 
-Starting in 5.90080 L<Catalyst> will enable UTF8 encoding by default for 
+Starting in 5.90080 L<Catalyst> will enable UTF8 encoding by default for
 text like body responses.  In addition we've made a ton of fixes around encoding
 and utf8 scattered throughout the codebase.  This document attempts to give
 an overview of the assumptions and practices that  L<Catalyst> uses when
@@ -17,7 +17,7 @@ We attempt to describe all relevant processes, try to give some advice
 and explain where we may have been exceptional to respect our commitment
 to backwards compatibility.
 
-=head1 UTF8 in Controller Actions 
+=head1 UTF8 in Controller Actions
 
 Using UTF8 characters in your Controller classes and actions.
 
@@ -32,7 +32,7 @@ as well as how you construct L<URL> objects to actions with UTF8 paths
 
     package MyApp::Controller::Root;
 
-    use uf8;
+    use utf8;
     use base 'Catalyst::Controller';
 
     sub heart_with_arg :Path('♥') Args(1)  {
@@ -60,7 +60,7 @@ In the example controller above we have constructed two matchable URL routes:
 
 The first one is a classic Path type action and the second uses Chaining, and
 spans three actions in total.  As you can see, you can use unicode characters
-in your Path and PartPart attributes (remember to use the C<utf8> pragma to allow
+in your Path and PathPart attributes (remember to use the C<utf8> pragma to allow
 these multibyte characters in your source).  The two constructed matchable routes
 would match the following incoming URLs:
 
@@ -104,8 +104,8 @@ unicode characters as well:
 
 Again, remember that we are display the unicode character and using it to match actions
 containing such multibyte characters BUT over HTTP you are getting these as URL encoded
-bytes.  For example if you looked at the L<PSGI> C<$env> value for C<REQUEST_URI> you 
-would see (for the above request) 
+bytes.  For example if you looked at the L<PSGI> C<$env> value for C<REQUEST_URI> you
+would see (for the above request)
 
     REQUEST_URI => "/base/%E2%99%A5/%E2%99%A5/%E2%99%A5/%E2%99%A5"
 
@@ -133,7 +133,7 @@ pragma).
     use utf8;
     my $url = $c->uri_for( $c->controller('Root')->action_for('arg'), ['♥','♥']);
 
-When you stringyfy this object (for use in a template, for example) it will automatically
+When you stringify this object (for use in a template, for example) it will automatically
 do the right thing regarding utf8 encoding and url encoding.
 
     http://localhost/base/%E2%99%A5/%E2%99%A5/%E2%99%A5/%E2%99%A5
@@ -148,9 +148,8 @@ What Catalyst does with UTF8 in your GET and classic HTML Form POST
 
 =head2 UTF8 in URL query and keywords
 
-The same rules that we find in URL paths also cover URL query parts.  That is if
-one types a URL like this into the browser (again assuming a modernish UI that
-allows unicode)
+The same rules that we find in URL paths also cover URL query parts.  That is
+if one types a URL like this into the browser
 
 	http://localhost/example?♥=♥♥
 
@@ -178,7 +177,7 @@ L<Catalyst> will do all the necessary encoding for you).
 
 Again, remember that values of your parameters are now decode into Unicode strings.  so
 for example you'd expect the result of length to reflect the character length not
-the byte length.  
+the byte length.
 
 Just like with arguments and captures, you can use utf8 literals (or utf8
 strings) in $c->uri_for:
@@ -186,13 +185,13 @@ strings) in $c->uri_for:
 	use utf8;
 	my $url = $c->uri_for( $c->controller('Root')->action_for('example'), {'♥' => '♥♥'});
 
-When you stringyfy this object (for use in a template, for example) it will automatically
+When you stringify this object (for use in a template, for example) it will automatically
 do the right thing regarding utf8 encoding and url encoding.
 
 	http://localhost/example?%E2%99%A5=%E2%99%A5%E2%99%A5
 
 Since again what you want is a properly url encoded version of this.  Ultimately what you want
-to send over the wire via HTTP needs to be bytes (not unicode characters). 
+to send over the wire via HTTP needs to be bytes (not unicode characters).
 
 Remember if you use any utf8 literals in your source code, you should use the
 C<use utf8> pragma.
@@ -207,7 +206,7 @@ supposed to notice that and encode the form POSTs accordingly.
 As a result since L<Catalyst> now serves UTF8 encoded responses by default, this means that
 you can mostly rely on incoming form POSTs to be so encoded.  L<Catalyst> will make this
 assumption and decode accordingly (unless you explicitly turn off encoding...)  If you are
-running Catalyst in developer debug, then you will see the correct unicode characters in 
+running Catalyst in developer debug, then you will see the correct unicode characters in
 the debug output.  For example if you generate a POST request:
 
 	use Catalyst::Test 'MyApp';
@@ -228,7 +227,7 @@ Running in CATALYST_DEBUG=1 mode you should see output like this:
 And if you had a controller like this:
 
 	package MyApp::Controller::Example;
-	
+
 	use base 'Catalyst::Controller';
 
 	sub posted :POST Local {
@@ -242,7 +241,7 @@ The following test case would be true:
 	use Encode 2.21 'decode_utf8';
 	is decode_utf8($req->content), 'hearts => ♥';
 
-In this case we decode so that we can print and compare strings with multibyte characters.	
+In this case we decode so that we can print and compare strings with multibyte characters.
 
 B<NOTE>  In some cases some browsers may not follow the specification and set the form POST
 encoding based on the server response.  Catalyst itself doesn't attempt any workarounds, but one
@@ -281,7 +280,7 @@ determine when that is needed.
 		my ($self, $c) = @_;
 		$c->response->content_type('text/html');
 		$c->response->write("<p>This is stream_write action ♥</p>");
-	}	
+	}
 
 	sub stream_write_fh :Local {
 		my ($self, $c) = @_;
@@ -324,7 +323,7 @@ This would match content-types like the following (examples)
     application/xml
     application/vnd.user+xml
 
-You should set your content type prior to header finalization if you want L<Catalyst> to 
+You should set your content type prior to header finalization if you want L<Catalyst> to
 encode.
 
 B<NOTE> We do not attempt to encode C<application/json> since the two most commonly used
@@ -355,7 +354,7 @@ B<NOTE> pay attention to the content-type setting in the example.  L<Catalyst> i
 content type carefully to determine if the body needs encoding).
 
 B<NOTE> If you set the character set of the response L<Catalyst> will skip encoding IF the
-character set is set to somethng that doesn't match $c->encoding->mime_name. We will assume
+character set is set to something that doesn't match $c->encoding->mime_name. We will assume
 if you are setting an alternative character set, that means you want to handle the encoding
 yourself.  However it might be easier to set $c->encoding for a given response cycle since
 you can override this for a given response.  For example here's how to override the default
@@ -402,7 +401,7 @@ L<Catalyst> will encode each line in turn as long as the content-type meets the 
 requirement and $c->encoding is set (which it is, as long as you did not change it).
 
 B<NOTE> If you try to change the encoding after you start the stream, this will invoke an error
-reponse.  However since you've already started streaming this will not show up as an HTTP error
+response.  However since you've already started streaming this will not show up as an HTTP error
 status code, but rather error information in your body response and an error in your logs.
 
 The second way to stream a response is to get the response writer object and invoke methods
@@ -417,7 +416,7 @@ on that directly:
 		$writer->close;
 	}
 
-This can be used just like the C<write> method, but typicallty you request this object when
+This can be used just like the C<write> method, but typically you request this object when
 you want to do a nonblocking style response since the writer object can be closed over or
 sent to a model that will invoke it in a non blocking manner.  For more on using the writer
 object for non blocking responses you should review the C<Catalyst> documentation and also
@@ -455,7 +454,7 @@ check the current docs and changelog.  Its possible a future release will requir
 a encoding on the IO layer level so that we can be sure to properly encode at body finalization.
 So this is still an edge case we are writing test examples for.  But for now if you are returning
 a filehandle like response, you are expected to make sure you are following the L<PSGI> specification
-and that unencoded bytes are returned.
+and return raw bytes.
 
 =head2 Override the Encoding on Context
 
