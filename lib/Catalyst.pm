@@ -129,7 +129,7 @@ __PACKAGE__->stats_class('Catalyst::Stats');
 __PACKAGE__->_encode_check(Encode::FB_CROAK | Encode::LEAVE_SRC);
 
 # Remember to update this in Catalyst::Runtime as well!
-our $VERSION = '5.90082';
+our $VERSION = '5.90083';
 $VERSION = eval $VERSION if $VERSION =~ /_/; # numify for warning-free dev releases
 
 sub import {
@@ -4315,6 +4315,8 @@ abw: Andy Wardley
 acme: Leon Brocard <leon@astray.com>
 
 abraxxa: Alexander Hartmaier <abraxxa@cpan.org>
+
+andrewalker: André Walker <andre@cpan.org>
 
 Andrew Bramble
 
