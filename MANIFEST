@@ -49,6 +49,7 @@ lib/Catalyst/Model.pm
 lib/Catalyst/Plugin/Unicode/Encoding.pm
 lib/Catalyst/PSGI.pod
 lib/Catalyst/Request.pm
+lib/Catalyst/Request/PartData.pm
 lib/Catalyst/Request/Upload.pm
 lib/Catalyst/Response.pm
 lib/Catalyst/Response/Writer.pm

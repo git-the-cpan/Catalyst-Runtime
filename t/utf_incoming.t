@@ -7,6 +7,7 @@ use HTTP::Message::PSGI ();
 use Encode 2.21 'decode_utf8', 'encode_utf8', 'encode';
 use File::Spec;
 use JSON::MaybeXS;
+use Scalar::Util ();
 
 # Test cases for incoming utf8 
 
@@ -381,7 +382,7 @@ use Catalyst::Test 'MyApp';
   ok my $res = request $req;
 
   ## decode_json expect the binary utf8 string and does the decoded bit for us.
-  is_deeply decode_json(($res->content)), +{'♥'=>'♥♥'};
+  is_deeply decode_json(($res->content)), +{'♥'=>'♥♥'}, 'JSON was decoded correctly';
 }
 
 {
@@ -392,7 +393,7 @@ use Catalyst::Test 'MyApp';
   is $enc->decode($res->content), "テスト", 'correct body';
   is $res->content_length, 6, 'correct length'; # Bytes over the wire
   is length($enc->decode($res->content)), 3;
-  is $res->content_charset, 'SHIFT_JIS';
+  is $res->content_charset, 'SHIFT_JIS', 'content charset is SHIFT_JIS as expected';
 }
 
 {
@@ -414,7 +415,7 @@ SKIP: {
 
   is $res->code, 200, 'OK';
   is decode_utf8($content), "manual_1 ♥", 'correct body';
-  is $res->content_charset, 'UTF-8';
+  is $res->content_charset, 'UTF-8', 'zlib charset is set correctly';
 }
 
 {
@@ -430,11 +431,10 @@ SKIP: {
   is $res->code, 200, 'OK';
   is decode_utf8($res->content), '<p>This is path-heart action ♥</p>', 'correct body';
   is $res->content_length, 36, 'correct length';
-  is $res->content_charset, 'UTF-8';
+  is $res->content_charset, 'UTF-8', 'external PSGI app has expected charset';
 }
 
-SKIP: {
-  skip 4;
+{
   my $utf8 = 'test ♥';
   my $shiftjs = 'test テスト';
 
@@ -442,6 +442,11 @@ SKIP: {
     Content_Type => 'form-data',
       Content =>  [
         arg0 => 'helloworld',
+        Encode::encode('UTF-8','♥') => Encode::encode('UTF-8','♥♥'),  # Long form POST simple does not auto encode...
+        Encode::encode('UTF-8','♥♥♥') => [
+          undef, '',
+          'Content-Type' =>'text/plain; charset=SHIFT_JIS',
+          'Content' => Encode::encode('SHIFT_JIS', $shiftjs)],
         arg1 => [
           undef, '',
           'Content-Type' =>'text/plain; charset=UTF-8',
@@ -458,9 +463,19 @@ SKIP: {
 
   my ($res, $c) = ctx_request $req;
 
-  is $c->req->body_parameters->{'arg0'}, 'helloworld';
-  is Encode::decode('UTF-8', $c->req->body_parameters->{'arg1'}), $utf8;
-  is Encode::decode('SHIFT_JIS', $c->req->body_parameters->{'arg2'}[0]), $shiftjs;
+  is $c->req->body_parameters->{'arg0'}, 'helloworld', 'got helloworld value';
+  is $c->req->body_parameters->{'♥'}, '♥♥';
+
+  ok Scalar::Util::blessed($c->req->body_parameters->{'arg1'});
+  ok Scalar::Util::blessed($c->req->body_parameters->{'arg2'}[0]);
+  ok Scalar::Util::blessed($c->req->body_parameters->{'arg2'}[1]);
+  ok Scalar::Util::blessed($c->req->body_parameters->{'♥♥♥'});
+
+  # Since the form post is COMPLEX you are expected to decode it yourself.
+  is Encode::decode('UTF-8', $c->req->body_parameters->{'arg1'}->raw_data), $utf8, 'decoded utf8 param';
+  is Encode::decode('SHIFT_JIS', $c->req->body_parameters->{'arg2'}[0]->raw_data), $shiftjs, 'decoded shiftjis param';
+  is Encode::decode('SHIFT_JIS', $c->req->body_parameters->{'arg2'}[1]->raw_data), $shiftjs, 'decoded shiftjis param';
+  is Encode::decode('SHIFT_JIS', $c->req->body_parameters->{'♥♥♥'}->raw_data), $shiftjs, 'decoded shiftjis param';
 
 }
 
