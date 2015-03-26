@@ -21,6 +21,7 @@ L<Catalyst::Controller> subclasses.
 
 use Moose;
 use Scalar::Util 'looks_like_number';
+use Moose::Util::TypeConstraints ();
 with 'MooseX::Emulate::Class::Accessor::Fast';
 use namespace::clean -except => 'meta';
 
@@ -38,6 +39,211 @@ has private_path => (
   default => sub { '/'.shift->reverse },
 );
 
+has number_of_args => (
+  is=>'ro',
+  init_arg=>undef,
+  isa=>'Int|Undef',
+  required=>1,
+  lazy=>1,
+  builder=>'_build_number_of_args');
+
+  sub _build_number_of_args {
+    my $self = shift;
+    if( ! exists $self->attributes->{Args} ) {
+      # When 'Args' does not exist, that means we want 'any number of args'.
+      return undef;
+    } elsif(!defined($self->attributes->{Args}[0])) {
+      # When its 'Args' that internal cue for 'unlimited'
+      return undef;
+    } elsif(
+      scalar(@{$self->attributes->{Args}}) == 1 &&
+      looks_like_number($self->attributes->{Args}[0])
+    ) {
+      # 'Old school' numbered args (is allowed to be undef as well)
+      return $self->attributes->{Args}[0];
+    } else {
+      # New hotness named arg constraints
+      return $self->number_of_args_constraints;
+    }
+  }
+
+sub normalized_arg_number {
+  return defined($_[0]->number_of_args) ? $_[0]->number_of_args : ~0;
+}
+
+has number_of_args_constraints => (
+  is=>'ro',
+  isa=>'Int|Undef',
+  init_arg=>undef,
+  required=>1,
+  lazy=>1,
+  builder=>'_build_number_of_args_constraints');
+
+  sub _build_number_of_args_constraints {
+    my $self = shift;
+    return unless $self->has_args_constraints;
+
+    my $total = 0;
+    foreach my $tc( @{$self->args_constraints}) {
+      if($tc->is_a_type_of('Ref')) {
+        if($tc->can('parameters') && $tc->has_parameters) {
+          my $total_params = scalar(@{ $tc->parameters||[] });
+          $total = $total + $total_params;
+        } else {
+          # Its a Reftype but we don't know the number of params it
+          # actually validates.
+          return undef;
+        }
+      } else {
+        $total++;
+      }
+    }
+
+    return $total;
+  }
+
+has args_constraints => (
+  is=>'ro',
+  init_arg=>undef,
+  traits=>['Array'],
+  isa=>'ArrayRef',
+  required=>1,
+  lazy=>1,
+  builder=>'_build_args_constraints',
+  handles => {
+    has_args_constraints => 'count',
+    args_constraint_count => 'count',
+  });
+
+  sub _build_args_constraints {
+    my $self = shift;
+    my @arg_protos = @{$self->attributes->{Args}||[]};
+
+    return [] unless scalar(@arg_protos);
+    return [] unless defined($arg_protos[0]);
+
+    # If there is only one arg and it looks like a number
+    # we assume its 'classic' and the number is the number of
+    # constraints.
+    my @args = ();
+    if(
+      scalar(@arg_protos) == 1 &&
+      looks_like_number($arg_protos[0])
+    ) {
+      return \@args;
+    } else {
+      @args =
+        map {  my @tc = $self->resolve_type_constraint($_); scalar(@tc) ? @tc : die "$_ is not a constraint!" }
+        @arg_protos;
+    }
+    return \@args;
+  }
+
+has number_of_captures_constraints => (
+  is=>'ro',
+  isa=>'Int|Undef',
+  init_arg=>undef,
+  required=>1,
+  lazy=>1,
+  builder=>'_build_number_of_capture_constraints');
+
+  sub _build_number_of_capture_constraints {
+    my $self = shift;
+    return unless $self->has_captures_constraints;
+
+    my $total = 0;
+    foreach my $tc( @{$self->captures_constraints}) {
+      if($tc->is_a_type_of('Ref')) {
+        if($tc->can('parameters') && $tc->has_parameters) {
+          my $total_params = scalar(@{ $tc->parameters||[] });
+          $total = $total + $total_params;
+        } else {
+          # Its a Reftype but we don't know the number of params it
+          # actually validates.  This is not currently permitted in
+          # a capture...
+          die "You cannot use CaptureArgs($tc) in ${\$self->reverse} because we cannot determined the number of its parameters";
+        }
+      } else {
+        $total++;
+      }
+    }
+
+    return $total;
+  }
+
+has captures_constraints => (
+  is=>'ro',
+  init_arg=>undef,
+  traits=>['Array'],
+  isa=>'ArrayRef',
+  required=>1,
+  lazy=>1,
+  builder=>'_build_captures_constraints',
+  handles => {
+    has_captures_constraints => 'count',
+    captures_constraints_count => 'count',
+  });
+
+  sub _build_captures_constraints {
+    my $self = shift;
+    my @arg_protos = @{$self->attributes->{CaptureArgs}||[]};
+
+    return [] unless scalar(@arg_protos);
+    return [] unless defined($arg_protos[0]);
+    # If there is only one arg and it looks like a number
+    # we assume its 'classic' and the number is the number of
+    # constraints.
+    my @args = ();
+    if(
+      scalar(@arg_protos) == 1 &&
+      looks_like_number($arg_protos[0])
+    ) {
+      return \@args;
+    } else {
+      @args =
+        map {  my @tc = $self->resolve_type_constraint($_); scalar(@tc) ? @tc : die "$_ is not a constraint!" }
+        @arg_protos;
+    }
+
+    return \@args;
+  }
+
+sub resolve_type_constraint {
+  my ($self, $name) = @_;
+  my @tc = eval "package ${\$self->class}; $name";
+  return @tc if $tc[0];
+  return Moose::Util::TypeConstraints::find_or_parse_type_constraint($name);
+}
+
+has number_of_captures => (
+  is=>'ro',
+  init_arg=>undef,
+  isa=>'Int',
+  required=>1,
+  lazy=>1,
+  builder=>'_build_number_of_captures');
+
+  sub _build_number_of_captures {
+    my $self = shift;
+    if( ! exists $self->attributes->{CaptureArgs} ) {
+      # If there are no defined capture args, thats considered 0.
+      return 0;
+    } elsif(!defined($self->attributes->{CaptureArgs}[0])) {
+      # If you fail to give a defined value, that's also 0
+      return 0;
+    } elsif(
+      scalar(@{$self->attributes->{CaptureArgs}}) == 1 &&
+      looks_like_number($self->attributes->{CaptureArgs}[0])
+    ) {
+      # 'Old school' numbered captures
+      return $self->attributes->{CaptureArgs}[0];
+    } else {
+      # New hotness named arg constraints
+      return $self->number_of_captures_constraints;
+    }
+  }
+
+
 use overload (
 
     # Stringify to reverse for debug output etc.
@@ -50,8 +256,6 @@ use overload (
     fallback => 1,
 
 );
-
-
 
 no warnings 'recursion';
 
@@ -67,40 +271,81 @@ sub execute {
 
 sub match {
     my ( $self, $c ) = @_;
-    #would it be unreasonable to store the number of arguments
-    #the action has as its own attribute?
-    #it would basically eliminate the code below.  ehhh. small fish
-    return 1 unless exists $self->attributes->{Args};
-    my $args = $self->attributes->{Args}[0];
-    return 1 unless defined($args) && length($args);
-    return scalar( @{ $c->req->args } ) == $args;
+    return $self->match_args($c, $c->req->args);
 }
 
-sub match_captures { 1 }
+sub match_args {
+    my ($self, $c, $args) = @_;
+    my @args = @{$args||[]};
+
+    # If infinite args, we always match
+    return 1 if $self->normalized_arg_number == ~0;
+
+    # There there are arg constraints, we must see to it that the constraints
+    # check positive for each arg in the list.
+    if($self->has_args_constraints) {
+      # If there is only one type constraint, and its a Ref or subtype of Ref,
+      # That means we expect a reference, so use the full args arrayref.
+      if(
+        $self->args_constraint_count == 1 &&
+        (
+          $self->args_constraints->[0]->is_a_type_of('Ref') ||
+          $self->args_constraints->[0]->is_a_type_of('ClassName')
+        )
+      ) {
+        return $self->args_constraints->[0]->check($args);
+        # Removing coercion stuff for the first go
+        #if($self->args_constraints->[0]->coercion && $self->attributes->{Coerce}) {
+        #  my $coerced = $self->args_constraints->[0]->coerce($c) || return 0;
+        #  $c->req->args([$coerced]);
+        #  return 1;
+        #}
+      } else {
+        # Because of the way chaining works, we can expect args that are totally not
+        # what you'd expect length wise.  When they don't match length, thats a fail
+        return 0 unless scalar( @args ) == $self->normalized_arg_number;
+
+        for my $i(0..$#args) {
+          $self->args_constraints->[$i]->check($args[$i]) || return 0;
+        }
+        return 1;
+      }
+    } else {
+      # Otherwise, we just need to match the number of args.
+      return scalar( @args ) == $self->normalized_arg_number;
+    }
+}
+
+sub match_captures {
+  my ($self, $c, $captures) = @_;
+  my @captures = @{$captures||[]};
+
+  return 1 unless scalar(@captures); # If none, just say its ok
+
+  if($self->has_captures_constraints) {
+    if(
+      $self->captures_constraints_count == 1 &&
+      (
+        $self->captures_constraints->[0]->is_a_type_of('Ref') ||
+        $self->captures_constraints->[0]->is_a_type_of('ClassName')
+      )
+    ) {
+      return $self->captures_constraints->[0]->check($captures);
+    } else {
+      for my $i(0..$#captures) {
+        $self->captures_constraints->[$i]->check($captures[$i]) || return 0;
+      }
+      return 1;
+      }
+  } else {
+    return 1;
+  }
+  return 1;
+}
 
 sub compare {
     my ($a1, $a2) = @_;
-
-    my ($a1_args) = @{ $a1->attributes->{Args} || [] };
-    my ($a2_args) = @{ $a2->attributes->{Args} || [] };
-
-    $_ = looks_like_number($_) ? $_ : ~0
-        for $a1_args, $a2_args;
-
-    return $a1_args <=> $a2_args;
-}
-
-sub number_of_args {
-    my ( $self ) = @_;
-    return 0 unless exists $self->attributes->{Args};
-    return $self->attributes->{Args}[0];
-}
-
-sub number_of_captures {
-    my ( $self ) = @_;
-
-    return 0 unless exists $self->attributes->{CaptureArgs};
-    return $self->attributes->{CaptureArgs}[0] || 0;
+    return $a1->normalized_arg_number <=> $a2->normalized_arg_number;
 }
 
 sub scheme {
@@ -110,7 +355,7 @@ sub scheme {
 sub list_extra_info {
   my $self = shift;
   return {
-    Args => exists $self->attributes->{Args} ? $self->attributes->{Args}[0] : undef,
+    Args => $self->normalized_arg_number,
     CaptureArgs => $self->number_of_captures,
   }
 } 
@@ -161,6 +406,14 @@ of the captures for this action.
 Returning true from this method causes the chain match to continue, returning
 makes the chain not match (and alternate, less preferred chains will be attempted).
 
+=head2 match_args($c, $args)
+
+Underlying feature that does the 'match' work, but doesn't require a context to
+work (like 'match' does.).
+
+=head2 resolve_type_constraint
+
+Trys to find a type constraint if you have on on a type constrained method.
 
 =head2 compare
 
@@ -186,7 +439,13 @@ Returns the sub name of this action.
 
 =head2 number_of_args
 
-Returns the number of args this action expects. This is 0 if the action doesn't take any arguments and undef if it will take any number of arguments.
+Returns the number of args this action expects. This is 0 if the action doesn't
+take any arguments and undef if it will take any number of arguments.
+
+=head2 normalized_arg_number
+
+For the purposes of comparison we normalize 'number_of_args' so that if it is
+undef we mean ~0 (as many args are we can think of).
 
 =head2 number_of_captures
 
@@ -214,3 +473,5 @@ This library is free software. You can redistribute it and/or modify it under
 the same terms as Perl itself.
 
 =cut
+
+

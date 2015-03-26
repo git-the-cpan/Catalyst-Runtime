@@ -53,6 +53,7 @@ lib/Catalyst/Request/PartData.pm
 lib/Catalyst/Request/Upload.pm
 lib/Catalyst/Response.pm
 lib/Catalyst/Response/Writer.pm
+lib/Catalyst/RouteMatching.pod
 lib/Catalyst/Runtime.pm
 lib/Catalyst/Script/CGI.pm
 lib/Catalyst/Script/Create.pm
@@ -192,6 +193,7 @@ t/aggregate/unit_utils_home.t
 t/aggregate/unit_utils_prefix.t
 t/aggregate/unit_utils_request.t
 t/aggregate/utf8_content_length.t
+t/arg_constraints.t
 t/args0_bug.t
 t/author/http-server.t
 t/author/notabs.t

@@ -129,7 +129,7 @@ __PACKAGE__->stats_class('Catalyst::Stats');
 __PACKAGE__->_encode_check(Encode::FB_CROAK | Encode::LEAVE_SRC);
 
 # Remember to update this in Catalyst::Runtime as well!
-our $VERSION = '5.90085';
+our $VERSION = '5.90089_001';
 $VERSION = eval $VERSION if $VERSION =~ /_/; # numify for warning-free dev releases
 
 sub import {
@@ -1447,6 +1447,10 @@ In general the scheme of the generated URI object will follow the incoming reque
 however if your targeted action or action chain has the Scheme attribute it will
 use that instead.
 
+Also, if the targeted Action or Action chain declares Args/CaptureArgs that have
+type constraints, we will require that your proposed URL verify on those declared
+constraints.
+
 =cut
 
 sub uri_for {
@@ -1465,60 +1469,59 @@ sub uri_for {
 
     carp "uri_for called with undef argument" if grep { ! defined $_ } @args;
 
-    my @encoded_args = ();
-    foreach my $arg (@args) {
-      if(ref($arg)||'' eq 'ARRAY') {
-        push @encoded_args, [map {
-          my $encoded = encode_utf8 $_;
-          $encoded =~ s/([^$URI::uric])/$URI::Escape::escapes{$1}/go;
-         $encoded;
-        } @$arg];
-      } else {
-        push @encoded_args, do {
-          my $encoded = encode_utf8 $arg;
-          $encoded =~ s/([^$URI::uric])/$URI::Escape::escapes{$1}/go;
-          $encoded;
-        }
-      }
-    }
-
     my $target_action = $path->$_isa('Catalyst::Action') ? $path : undef;
     if ( $path->$_isa('Catalyst::Action') ) { # action object
-        s|/|%2F|g for @encoded_args;
+        s|/|%2F|g for @args;
         my $captures = [ map { s|/|%2F|g; $_; }
-                        ( scalar @encoded_args && ref $encoded_args[0] eq 'ARRAY'
-                         ? @{ shift(@encoded_args) }
+                        ( scalar @args && ref $args[0] eq 'ARRAY'
+                         ? @{ shift(@args) }
                          : ()) ];
 
         my $action = $path;
+        my $expanded_action = $c->dispatcher->expand_action( $action );
+        my $num_captures = $expanded_action->number_of_captures;
+
         # ->uri_for( $action, \@captures_and_args, \%query_values? )
-        if( !@encoded_args && $action->number_of_args ) {
-            my $expanded_action = $c->dispatcher->expand_action( $action );
-            my $num_captures = $expanded_action->number_of_captures;
-            unshift @encoded_args, splice @$captures, $num_captures;
+        if( !@args && $action->number_of_args ) {
+          unshift @args, splice @$captures, $num_captures;
         }
 
-       $path = $c->dispatcher->uri_for_action($action, $captures);
+        if($num_captures) {
+          unless($expanded_action->match_captures($c, $captures)) {
+            carp "captures [@{$captures}] do not match the type constraints in actionchain ending with '$action'";
+            return;
+          }
+        }
+
+        $path = $c->dispatcher->uri_for_action($action, $captures);
         if (not defined $path) {
             $c->log->debug(qq/Can't find uri_for action '$action' @$captures/)
                 if $c->debug;
             return undef;
         }
         $path = '/' if $path eq '';
+
+        # At this point @encoded_args is the remaining Args (all captures removed).
+        if($expanded_action->has_args_constraints) {
+          unless($expanded_action->match_args($c,\@args)) {
+             carp "args [@args] do not match the type constraints in action '$expanded_action'";
+             return;
+          }
+        }
     }
 
-    unshift(@encoded_args, $path);
+    unshift(@args, $path);
 
     unless (defined $path && $path =~ s!^/!!) { # in-place strip
         my $namespace = $c->namespace;
         if (defined $path) { # cheesy hack to handle path '../foo'
-           $namespace =~ s{(?:^|/)[^/]+$}{} while $encoded_args[0] =~ s{^\.\./}{};
+           $namespace =~ s{(?:^|/)[^/]+$}{} while $args[0] =~ s{^\.\./}{};
         }
-        unshift(@encoded_args, $namespace || '');
+        unshift(@args, $namespace || '');
     }
 
     # join args with '/', or a blank string
-    my $args = join('/', grep { defined($_) } @encoded_args);
+    my $args = join('/', grep { defined($_) } @args);
     $args =~ s/\?/%3F/g; # STUPID STUPID SPECIAL CASE
     $args =~ s!^/+!!;
 
@@ -1567,6 +1570,11 @@ sub uri_for {
       } @keys);
     }
 
+    $base = encode_utf8 $base;
+    $base =~ s/([^$URI::uric])/$URI::Escape::escapes{$1}/go;
+    $args = encode_utf8 $args;
+    $args =~ s/([^$URI::uric])/$URI::Escape::escapes{$1}/go;
+    
     my $res = bless(\"${base}${args}${query}", $class);
     $res;
 }
