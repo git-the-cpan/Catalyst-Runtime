@@ -5,7 +5,7 @@ use utf8;
 
 BEGIN {
   use Test::More;
-  eval "use Type::Tiny; 1" || do {
+  eval "use Type::Tiny 1.000005; 1" || do {
     plan skip_all => "Trouble loading Type::Tiny and friends => $@";
   };
 }
@@ -66,6 +66,7 @@ BEGIN {
 
   use Moose;
   use MooseX::MethodAttributes;
+  use Types::Standard qw/slurpy/;
   use MyApp::Types qw/Tuple Int Str StrMatch ArrayRef UserId User Heart/;
 
   extends 'Catalyst::Controller';
@@ -82,6 +83,11 @@ BEGIN {
     $c->res->body("name: $user->{name}, age: $user->{age}");
   }
 
+  sub stringy_enum :Local Args('Int',Int) {
+    my ($self, $c) = @_;
+    $c->res->body('enum');
+  }
+
   sub an_int :Local Args(Int) {
     my ($self, $c, $int) = @_;
     $c->res->body('an_int');
@@ -93,11 +99,16 @@ BEGIN {
   }
 
   sub many_ints :Local Args(ArrayRef[Int]) {
-    my ($self, $c, $int) = @_;
+    my ($self, $c, @ints) = @_;
     $c->res->body('many_ints');
   }
 
   sub tuple :Local Args(Tuple[Str,Int]) {
+    my ($self, $c, $str, $int) = @_;
+    $c->res->body('tuple');
+  }
+
+  sub slurpy_tuple :Local Args(Tuple[Str,Int, slurpy ArrayRef[Int]]) {
     my ($self, $c, $str, $int) = @_;
     $c->res->body('tuple');
   }
@@ -295,6 +306,17 @@ SKIP: {
 }
 
 {
+  my $res = request '/tuple/aaa/111/111/111';
+  is $res->content, 'default';
+}
+
+{
+  my $res = request '/slurpy_tuple/aaa/111/111/111';
+  is $res->content, 'tuple';
+}
+
+
+{
   my $res = request '/many_ints/1/2/a';
   is $res->content, 'default';
 }
@@ -363,6 +385,21 @@ SKIP: {
 {
     my $res = request POST '/chain_base2/capture';
     is $res->content, 'chained_zero2', "request POST '/chain_base2/capture'";
+}
+
+{
+    my $res = request '/stringy_enum/1/2';
+    is $res->content, 'enum', "request '/stringy_enum/a'";
+}
+
+{
+    my $res = request '/stringy_enum/b/2';
+    is $res->content, 'default', "request '/stringy_enum/a'";
+}
+
+{
+    my $res = request '/stringy_enum/1/a';
+    is $res->content, 'default', "request '/stringy_enum/a'";
 }
 
 =over

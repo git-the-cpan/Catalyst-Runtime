@@ -63,7 +63,9 @@ has request => (
     is => 'rw',
     default => sub {
         my $self = shift;
-        $self->request_class->new($self->_build_request_constructor_args);
+        my $class = ref $self;
+        my $composed_request_class = $class->composed_request_class;
+        return $composed_request_class->new( $self->_build_request_constructor_args);
     },
     lazy => 1,
 );
@@ -77,11 +79,20 @@ sub _build_request_constructor_args {
     \%p;
 }
 
+sub composed_request_class {
+  my $class = shift;
+  my @traits = (@{$class->request_class_traits||[]}, @{$class->config->{request_class_traits}||[]});
+  return $class->_composed_request_class ||
+    $class->_composed_request_class(Moose::Util::with_traits($class->request_class, @traits));
+}
+
 has response => (
     is => 'rw',
     default => sub {
         my $self = shift;
-        $self->response_class->new($self->_build_response_constructor_args);
+        my $class = ref $self;
+        my $composed_response_class = $class->composed_response_class;
+        return $composed_response_class->new( $self->_build_response_constructor_args);
     },
     lazy => 1,
 );
@@ -90,6 +101,13 @@ sub _build_response_constructor_args {
       _log => $_[0]->log,
       encoding => $_[0]->encoding,
     };
+}
+
+sub composed_response_class {
+  my $class = shift;
+  my @traits = (@{$class->response_class_traits||[]}, @{$class->config->{response_class_traits}||[]});
+  return $class->_composed_response_class ||
+    $class->_composed_response_class(Moose::Util::with_traits($class->response_class, @traits));
 }
 
 has namespace => (is => 'rw');
@@ -120,16 +138,26 @@ __PACKAGE__->mk_classdata($_)
   for qw/components arguments dispatcher engine log dispatcher_class
   engine_loader context_class request_class response_class stats_class
   setup_finished _psgi_app loading_psgi_file run_options _psgi_middleware
-  _data_handlers _encoding _encode_check finalized_default_middleware/;
+  _data_handlers _encoding _encode_check finalized_default_middleware
+  request_class_traits response_class_traits stats_class_traits
+  _composed_request_class _composed_response_class _composed_stats_class/;
 
 __PACKAGE__->dispatcher_class('Catalyst::Dispatcher');
 __PACKAGE__->request_class('Catalyst::Request');
 __PACKAGE__->response_class('Catalyst::Response');
 __PACKAGE__->stats_class('Catalyst::Stats');
+
+sub composed_stats_class {
+  my $class = shift;
+  my @traits = (@{$class->stats_class_traits||[]}, @{$class->config->{stats_class_traits}||[]});
+  return $class->_composed_stats_class ||
+    $class->_composed_stats_class(Moose::Util::with_traits($class->stats_class, @traits));
+}
+
 __PACKAGE__->_encode_check(Encode::FB_CROAK | Encode::LEAVE_SRC);
 
 # Remember to update this in Catalyst::Runtime as well!
-our $VERSION = '5.90089_001';
+our $VERSION = '5.90089_002';
 $VERSION = eval $VERSION if $VERSION =~ /_/; # numify for warning-free dev releases
 
 sub import {
@@ -685,12 +713,23 @@ sub _comp_names {
 }
 
 # Filter a component before returning by calling ACCEPT_CONTEXT if available
+
+#our %tracker = ();
 sub _filter_component {
     my ( $c, $comp, @args ) = @_;
+
+    # die "Circular Dependencies Detected." if $tracker{$comp};
+    #   $tracker{$comp}++;
+    if(ref $comp eq 'CODE') {
+      $comp = $comp->($c);
+    }
+    #$tracker{$comp}++;
 
     if ( eval { $comp->can('ACCEPT_CONTEXT'); } ) {
         return $comp->ACCEPT_CONTEXT( $c, @args );
     }
+
+    $c->log->warn("You called component '${\$comp->catalyst_component_name}' with arguments [@args], but this component does not ACCEPT_CONTEXT, so args are ignored.") if scalar(@args) && $c->debug;
 
     return $comp;
 }
@@ -738,7 +777,8 @@ Gets a L<Catalyst::Model> instance by name.
 
     $c->model('Foo')->do_stuff;
 
-Any extra arguments are directly passed to ACCEPT_CONTEXT.
+Any extra arguments are directly passed to ACCEPT_CONTEXT, if the model
+defines ACCEPT_CONTEXT.  If it does not, the args are discarded.
 
 If the name is omitted, it will look for
  - a model object in $c->stash->{current_model_instance}, then
@@ -1487,8 +1527,8 @@ sub uri_for {
         }
 
         if($num_captures) {
-          unless($expanded_action->match_captures($c, $captures)) {
-            carp "captures [@{$captures}] do not match the type constraints in actionchain ending with '$action'";
+          unless($expanded_action->match_captures_constraints($c, $captures)) {
+            carp "captures [@{$captures}] do not match the type constraints in actionchain ending with '$expanded_action'";
             return;
           }
         }
@@ -2269,8 +2309,10 @@ sub prepare {
 
     $c->response->_context($c);
 
-    #surely this is not the most efficient way to do things...
-    $c->stats($class->stats_class->new)->enable($c->use_stats);
+    if($c->use_stats) {
+      $c->stats($class->composed_stats_class->new)->enable;
+    }
+
     if ( $c->debug || $c->config->{enable_catalyst_header} ) {
         $c->res->headers->header( 'X-Catalyst' => $Catalyst::VERSION );
     }
@@ -2676,9 +2718,25 @@ sub prepare_write { my $c = shift; $c->engine->prepare_write( $c, @_ ) }
 
 Returns or sets the request class. Defaults to L<Catalyst::Request>.
 
+=head2 $app->request_class_traits
+
+An arrayref of L<Moose::Role>s which are applied to the request class.  
+
+=head2 $app->composed_request_class
+
+This is the request class which has been composed with any request_class_traits.
+
 =head2 $c->response_class
 
 Returns or sets the response class. Defaults to L<Catalyst::Response>.
+
+=head2 $app->response_class_traits
+
+An arrayref of L<Moose::Role>s which are applied to the response class.
+
+=head2 $app->composed_response_class
+
+This is the request class which has been composed with any response_class_traits.
 
 =head2 $c->read( [$maxlength] )
 
@@ -2788,15 +2846,92 @@ sub setup_components {
     }
 
     for my $component (@comps) {
-        my $instance = $class->components->{ $component } = $class->setup_component($component);
-        my @expanded_components = $instance->can('expand_modules')
-            ? $instance->expand_modules( $component, $config )
-            : $class->expand_component_module( $component, $config );
-        for my $component (@expanded_components) {
-            next if $comps{$component};
-            $class->components->{ $component } = $class->setup_component($component);
-        }
+        my $instance = $class->components->{ $component } = $class->delayed_setup_component($component);
     }
+
+    # Inject a component or wrap a stand alone class in an adaptor. This makes a list
+    # of named components in the configuration that are not actually existing (not a
+    # real file).
+
+    my @injected_components = keys %{$class->config->{inject_components} ||+{}};
+    foreach my $injected_comp_name(@injected_components) {
+      my $component_class = $class->config->{inject_components}->{$injected_comp_name}->{from_component} || '';
+      if($component_class) {
+        my @roles = @{$class->config->{inject_components}->{$injected_comp_name}->{roles} ||[]};
+        my %args = %{ $class->config->{$injected_comp_name} || +{} };
+
+        Catalyst::Utils::inject_component(
+          into => $class,
+          component => $component_class,
+          (scalar(@roles) ? (traits => \@roles) : ()),
+          as => $injected_comp_name);
+      }
+    }
+
+    # All components are registered, now we need to 'init' them.
+    foreach my $component_name (keys %{$class->components||{}}) {
+      $class->components->{$component_name} = $class->components->{$component_name}->() if
+      (ref($class->components->{$component_name}) || '') eq 'CODE';
+    }
+}
+
+=head2 $app->inject_component($MyApp_Component_name => \%args);
+
+Add a component that is injected at setup:
+
+    MyApp->inject_component( 'Model::Foo' => { from_component => 'Common::Foo' } );
+
+Must be called before ->setup.  Expects a component name for your
+current application and \%args where
+
+=over 4
+
+=item from_component
+
+The target component being injected into your application
+
+=item roles
+
+An arrayref of L<Moose::Role>s that are applied to your component.
+
+=back
+
+Example
+
+    MyApp->inject_component(
+      'Model::Foo' => {
+        from_component => 'Common::Model::Foo',
+        roles => ['Role1', 'Role2'],
+      });
+
+=head2 $app->inject_components
+
+Inject a list of components:
+
+    MyApp->inject_components(
+      'Model::FooOne' => {
+        from_component => 'Common::Model::Foo',
+        roles => ['Role1', 'Role2'],
+      },
+      'Model::FooTwo' => {
+        from_component => 'Common::Model::Foo',
+        roles => ['Role1', 'Role2'],
+      });
+
+=cut
+
+sub inject_component {
+  my ($app, $name, $args) = @_;
+  die "Component $name exists" if
+    $app->config->{inject_components}->{$name};
+  $app->config->{inject_components}->{$name} = $args;
+}
+
+sub inject_components {
+  my $app = shift;
+  while(@_) {
+    $app->inject_component(shift, shift);
+  }
 }
 
 =head2 $c->locate_components( $setup_component_config )
@@ -2840,6 +2975,21 @@ sub expand_component_module {
     return Devel::InnerPackage::list_packages( $module );
 }
 
+=head2 $app->delayed_setup_component
+
+Returns a coderef that points to a setup_component instance.  Used
+internally for when you want to delay setup until the first time
+the component is called.
+
+=cut
+
+sub delayed_setup_component {
+  my($class, $component, @more) = @_;
+  return sub {
+    return my $instance = $class->setup_component($component, @more);
+  };
+}
+
 =head2 $c->setup_component
 
 =cut
@@ -2858,14 +3008,15 @@ sub setup_component {
     # for the debug screen, as $component is already the key name.
     local $config->{catalyst_component_name} = $component;
 
-    my $instance = eval { $component->COMPONENT( $class, $config ); };
-
-    if ( my $error = $@ ) {
-        chomp $error;
-        Catalyst::Exception->throw(
-            message => qq/Couldn't instantiate component "$component", "$error"/
-        );
-    }
+    my $instance = eval {
+      $component->COMPONENT( $class, $config );
+    } || do {
+      my $error = $@;
+      chomp $error;
+      Catalyst::Exception->throw(
+        message => qq/Couldn't instantiate component "$component", "$error"/
+      );
+    };
 
     unless (blessed $instance) {
         my $metaclass = Moose::Util::find_meta($component);
@@ -2877,7 +3028,16 @@ sub setup_component {
             qq/Couldn't instantiate component "$component", COMPONENT() method (from $component_method_from) didn't return an object-like value (value was $value)./
         );
     }
-    return $instance;
+
+    my @expanded_components = $instance->can('expand_modules')
+      ? $instance->expand_modules( $component, $config )
+      : $class->expand_component_module( $component, $config );
+    for my $component (@expanded_components) {
+      next if $class->components->{ $component };
+      $class->components->{ $component } = $class->setup_component($component);
+    }
+
+    return $instance; 
 }
 
 =head2 $c->setup_dispatcher
@@ -3683,6 +3843,14 @@ by itself.
 
 Returns or sets the stats (timing statistics) class. L<Catalyst::Stats|Catalyst::Stats> is used by default.
 
+=head2 $app->stats_class_traits
+
+A arrayref of L<Moose::Role>s that are applied to the stats_class before creating it.
+
+=head2 $app->composed_stats_class
+
+this is the stats_class composed with any 'stats_class_traits'.
+
 =head2 $c->use_stats
 
 Returns 1 when L<< stats collection|/"-Stats" >> is enabled.
@@ -3962,6 +4130,55 @@ C<psgi_middleware> - See L<PSGI MIDDLEWARE>.
 =item *
 
 C<data_handlers> - See L<DATA HANDLERS>.
+
+=item *
+
+C<stats_class_traits>
+
+An arrayref of L<Moose::Role>s that get componsed into your stats class.
+
+=item *
+
+C<request_class_traits>
+
+An arrayref of L<Moose::Role>s that get componsed into your request class.
+
+=item *
+
+C<response_class_traits>
+
+An arrayref of L<Moose::Role>s that get componsed into your response class.
+
+=item *
+
+C<inject_components>
+
+A Hashref of L<Catalyst::Component> subclasses that are 'injected' into configuration.
+For example:
+
+    MyApp->config({
+      inject_components => {
+        'Controller::Err' => { from_component => 'Local::Controller::Errors' },
+        'Model::Zoo' => { from_component => 'Local::Model::Foo' },
+        'Model::Foo' => { from_component => 'Local::Model::Foo', roles => ['TestRole'] },
+      },
+      'Controller::Err' => { a => 100, b=>200, namespace=>'error' },
+      'Model::Zoo' => { a => 2 },
+      'Model::Foo' => { a => 100 },
+    });
+
+Generally L<Catalyst> looks for components in your Model/View or Controller directories.
+However for cases when you which to use an existing component and you don't need any
+customization (where for when you can apply a role to customize it) you may inject those
+components into your application.  Please note any configuration should be done 'in the
+normal way', with a key under configuration named after the component affix, as in the
+above example.
+
+Using this type of injection allows you to construct significant amounts of your application
+with only configuration!.  This may or may not lead to increased code understanding.
+
+Please not you may also call the ->inject_components application method as well, although
+you must do so BEFORE setup.
 
 =back
 

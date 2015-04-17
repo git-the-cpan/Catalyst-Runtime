@@ -83,23 +83,40 @@ has number_of_args_constraints => (
     my $self = shift;
     return unless $self->has_args_constraints;
 
-    my $total = 0;
-    foreach my $tc( @{$self->args_constraints}) {
-      if($tc->is_a_type_of('Ref')) {
-        if($tc->can('parameters') && $tc->has_parameters) {
-          my $total_params = scalar(@{ $tc->parameters||[] });
-          $total = $total + $total_params;
-        } else {
-          # Its a Reftype but we don't know the number of params it
-          # actually validates.
-          return undef;
-        }
-      } else {
-        $total++;
-      }
-    }
+    # If there is one constraint and its a ref, we need to decide
+    # if this number 'unknown' number or if the ref allows us to
+    # determine a length.
 
-    return $total;
+    if(scalar @{$self->args_constraints} == 1) {
+      my $tc = $self->args_constraints->[0];
+      if(
+        $tc->can('is_strictly_a_type_of') &&
+        $tc->is_strictly_a_type_of('Tuple'))
+      {
+        my @parameters = @{ $tc->parameters||[]};
+        if( defined($parameters[-1]) and exists($parameters[-1]->{slurpy})) {
+          return undef;
+        } else {
+          return my $total_params = scalar(@parameters);
+        }
+      } elsif($tc->is_a_type_of('Ref')) {
+        return undef;
+      } else {
+        return 1; # Its a normal 1 arg type constraint.
+      }
+    } else {
+      # We need to loop thru and error on ref types.  We don't allow a ref type
+      # in the middle.
+      my $total = 0;
+      foreach my $tc( @{$self->args_constraints}) {
+        if($tc->is_a_type_of('Ref')) {
+          die "$tc is a Ref type constraint.  You cannot mix Ref and non Ref type constraints in Args for action ${\$self->reverse}";
+        } else {
+          ++$total;
+        }
+      }
+      return $total;
+    }
   }
 
 has args_constraints => (
@@ -151,24 +168,40 @@ has number_of_captures_constraints => (
     my $self = shift;
     return unless $self->has_captures_constraints;
 
-    my $total = 0;
-    foreach my $tc( @{$self->captures_constraints}) {
-      if($tc->is_a_type_of('Ref')) {
-        if($tc->can('parameters') && $tc->has_parameters) {
-          my $total_params = scalar(@{ $tc->parameters||[] });
-          $total = $total + $total_params;
-        } else {
-          # Its a Reftype but we don't know the number of params it
-          # actually validates.  This is not currently permitted in
-          # a capture...
-          die "You cannot use CaptureArgs($tc) in ${\$self->reverse} because we cannot determined the number of its parameters";
-        }
-      } else {
-        $total++;
-      }
-    }
+    # If there is one constraint and its a ref, we need to decide
+    # if this number 'unknown' number or if the ref allows us to
+    # determine a length.
 
-    return $total;
+    if(scalar @{$self->captures_constraints} == 1) {
+      my $tc = $self->captures_constraints->[0];
+      if(
+        $tc->can('is_strictly_a_type_of') &&
+        $tc->is_strictly_a_type_of('Tuple'))
+      {
+        my @parameters = @{ $tc->parameters||[]};
+        if( defined($parameters[-1]) and exists($parameters[-1]->{slurpy})) {
+          return undef;
+        } else {
+          return my $total_params = scalar(@parameters);
+        }
+      } elsif($tc->is_a_type_of('Ref')) {
+        die "You cannot use CaptureArgs($tc) in ${\$self->reverse} because we cannot determined the number of its parameters";
+      } else {
+        return 1; # Its a normal 1 arg type constraint.
+      }
+    } else {
+      # We need to loop thru and error on ref types.  We don't allow a ref type
+      # in the middle.
+      my $total = 0;
+      foreach my $tc( @{$self->captures_constraints}) {
+        if($tc->is_a_type_of('Ref')) {
+          die "$tc is a Ref type constraint.  You cannot mix Ref and non Ref type constraints in CaptureArgs for action ${\$self->reverse}";
+        } else {
+          ++$total;
+        }
+      }
+      return $total;
+    }
   }
 
 has captures_constraints => (
@@ -210,9 +243,12 @@ has captures_constraints => (
 
 sub resolve_type_constraint {
   my ($self, $name) = @_;
-  my @tc = eval "package ${\$self->class}; $name";
-  return @tc if $tc[0];
-  return Moose::Util::TypeConstraints::find_or_parse_type_constraint($name);
+  my @tc = eval "package ${\$self->class}; $name" or die "'$name' not a type constraint in ${\$self->private_path}";
+  if($tc[0]) {
+    return map { ref($_) ? $_ : Moose::Util::TypeConstraints::find_or_parse_type_constraint($_) } @tc;
+  } else {
+    return;
+  }
 }
 
 has number_of_captures => (
@@ -278,9 +314,6 @@ sub match_args {
     my ($self, $c, $args) = @_;
     my @args = @{$args||[]};
 
-    # If infinite args, we always match
-    return 1 if $self->normalized_arg_number == ~0;
-
     # There there are arg constraints, we must see to it that the constraints
     # check positive for each arg in the list.
     if($self->has_args_constraints) {
@@ -293,7 +326,21 @@ sub match_args {
           $self->args_constraints->[0]->is_a_type_of('ClassName')
         )
       ) {
-        return $self->args_constraints->[0]->check($args);
+        # Ok, the the type constraint is a ref type, which is allowed to have
+        # any number of args.  We need to check the arg length, if one is defined.
+        # If we had a ref type constraint that allowed us to determine the allowed
+        # number of args, we need to match that number.  Otherwise if there was an
+        # undetermined number (~0) then we allow all the args.  This is more of an
+        # Optimization since Tuple[Int, Int] would fail on 3,4,5 anyway, but this
+        # way we can avoid calling the constraint when the arg length is incorrect.
+        if(
+          $self->normalized_arg_number == ~0 ||
+          scalar( @args ) == $self->normalized_arg_number
+        ) {
+          return $self->args_constraints->[0]->check($args);
+        } else {
+          return 0;
+        }
         # Removing coercion stuff for the first go
         #if($self->args_constraints->[0]->coercion && $self->attributes->{Coerce}) {
         #  my $coerced = $self->args_constraints->[0]->coerce($c) || return 0;
@@ -311,6 +358,9 @@ sub match_args {
         return 1;
       }
     } else {
+      # If infinite args with no constraints, we always match
+      return 1 if $self->normalized_arg_number == ~0;
+
       # Otherwise, we just need to match the number of args.
       return scalar( @args ) == $self->normalized_arg_number;
     }
@@ -321,27 +371,36 @@ sub match_captures {
   my @captures = @{$captures||[]};
 
   return 1 unless scalar(@captures); # If none, just say its ok
+  return $self->has_captures_constraints ?
+    $self->match_captures_constraints($c, $captures) : 1;
 
-  if($self->has_captures_constraints) {
-    if(
-      $self->captures_constraints_count == 1 &&
-      (
-        $self->captures_constraints->[0]->is_a_type_of('Ref') ||
-        $self->captures_constraints->[0]->is_a_type_of('ClassName')
-      )
-    ) {
-      return $self->captures_constraints->[0]->check($captures);
-    } else {
-      for my $i(0..$#captures) {
-        $self->captures_constraints->[$i]->check($captures[$i]) || return 0;
-      }
-      return 1;
-      }
-  } else {
-    return 1;
-  }
   return 1;
 }
+
+sub match_captures_constraints {
+  my ($self, $c, $captures) = @_;
+  my @captures = @{$captures||[]};
+
+  # Match is positive if you don't have any.
+  return 1 unless $self->has_captures_constraints;
+
+  if(
+    $self->captures_constraints_count == 1 &&
+    (
+      $self->captures_constraints->[0]->is_a_type_of('Ref') ||
+      $self->captures_constraints->[0]->is_a_type_of('ClassName')
+    )
+  ) {
+    return $self->captures_constraints->[0]->check($captures);
+  } else {
+    for my $i(0..$#captures) {
+      $self->captures_constraints->[$i]->check($captures[$i]) || return 0;
+    }
+    return 1;
+    }
+
+}
+
 
 sub compare {
     my ($a1, $a2) = @_;
@@ -406,10 +465,14 @@ of the captures for this action.
 Returning true from this method causes the chain match to continue, returning
 makes the chain not match (and alternate, less preferred chains will be attempted).
 
+=head2 match_captures_constraints ($c, \@captures);
+
+Does the \@captures given match any constraints (if any constraints exist).  Returns
+true if you ask but there are no constraints.
+
 =head2 match_args($c, $args)
 
-Underlying feature that does the 'match' work, but doesn't require a context to
-work (like 'match' does.).
+Does the Args match or not?
 
 =head2 resolve_type_constraint
 

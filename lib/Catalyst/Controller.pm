@@ -374,6 +374,9 @@ sub gather_default_action_roles {
 
   push @roles, 'Catalyst::ActionRole::Scheme'
     if $args{attributes}->{Scheme};
+
+  push @roles, 'Catalyst::ActionRole::QueryMatching'
+    if $args{attributes}->{Query};
     return @roles;
 }
 
@@ -888,6 +891,21 @@ them into the controller namespace:
     sub match :Local Args(StrMatch[qr{\d\d-\d\d-\d\d}]) {
       my ($self, $c, $int) = @_;
     }
+
+If you choose not to use imported type constraints (like L<Type::Tiny>, or <MooseX::Types>
+you may use L<Moose> 'stringy' types however just like when you use these types in your
+declared attributes you must quote them:
+
+    sub my_moose_type :Local Args('Int') { ... }
+
+If you use 'reference' type constraints (such as ArrayRef[Int]) that have an unknown
+number of allowed matches, we set this the same way "Args" is.  Please keep in mind
+that actions with an undetermined number of args match at lower precidence than those
+with a fixed number.  You may use reference types such as Tuple from L<Types::Standard>
+that allows you to fix the number of allowed args.  For example Args(Tuple[Int,Int])
+would be determined to be two args (or really the same as Args(Int,Int).)  You may
+find this useful for creating custom subtypes with complex matching rules that you 
+wish to reuse over many actions.
 
 See L<Catalyst::RouteMatching> for more.
 
