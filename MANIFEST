@@ -29,6 +29,7 @@ lib/Catalyst/Component.pm
 lib/Catalyst/Component/ApplicationAttribute.pm
 lib/Catalyst/Component/ContextClosure.pm
 lib/Catalyst/Component/DelayedInstance.pm
+lib/Catalyst/Contributing.pod
 lib/Catalyst/Controller.pm
 lib/Catalyst/Delta.pod
 lib/Catalyst/Dispatcher.pm
@@ -75,6 +76,7 @@ MANIFEST			This list of files
 META.yml
 script/catalyst.pl
 t/01use.t
+t/accept_context_regression.t
 t/aggregate.t
 t/aggregate/c3_appclass_bug.t
 t/aggregate/c3_mro.t
@@ -465,6 +467,7 @@ t/psgi_file_testapp.t
 t/psgi_utils.t
 t/query_constraints.t
 t/remove_redundant_body.t
+t/set_allowed_method.t
 t/something/Makefile.PL
 t/something/script/foo/bar/for_dist
 t/undef-params.t

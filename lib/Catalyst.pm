@@ -157,7 +157,7 @@ sub composed_stats_class {
 __PACKAGE__->_encode_check(Encode::FB_CROAK | Encode::LEAVE_SRC);
 
 # Remember to update this in Catalyst::Runtime as well!
-our $VERSION = '5.90089_002';
+our $VERSION = '5.90089_003';
 $VERSION = eval $VERSION if $VERSION =~ /_/; # numify for warning-free dev releases
 
 sub import {
@@ -493,7 +493,7 @@ L<< detach|/"$c->detach( $action [, \@arguments ] )" >>. Like C<< $c->visit >>,
 C<< $c->go >> will perform a full dispatch on the specified action or method,
 with localized C<< $c->action >> and C<< $c->namespace >>. Like C<detach>,
 C<go> escapes the processing of the current request chain on completion, and
-does not return to its caller.
+does not return to its cunless blessed $cunless blessed $caller.
 
 @arguments are arguments to the final destination of $action. @captures are
 arguments to the intermediate steps, if any, on the way to the final sub of
@@ -542,6 +542,7 @@ t/middleware-stash.t in the distribution /t directory.
 
 sub stash {
   my $c = shift;
+  $c->log->error("You are requesting the stash but you don't have a context") unless blessed $c;
   return Catalyst::Middleware::Stash::get_stash($c->req->env)->(@_);
 }
 
@@ -714,19 +715,15 @@ sub _comp_names {
 
 # Filter a component before returning by calling ACCEPT_CONTEXT if available
 
-#our %tracker = ();
 sub _filter_component {
     my ( $c, $comp, @args ) = @_;
 
-    # die "Circular Dependencies Detected." if $tracker{$comp};
-    #   $tracker{$comp}++;
     if(ref $comp eq 'CODE') {
-      $comp = $comp->($c);
+      $comp = $comp->();
     }
-    #$tracker{$comp}++;
 
     if ( eval { $comp->can('ACCEPT_CONTEXT'); } ) {
-        return $comp->ACCEPT_CONTEXT( $c, @args );
+      return $comp->ACCEPT_CONTEXT( $c, @args );
     }
 
     $c->log->warn("You called component '${\$comp->catalyst_component_name}' with arguments [@args], but this component does not ACCEPT_CONTEXT, so args are ignored.") if scalar(@args) && $c->debug;
@@ -2853,25 +2850,49 @@ sub setup_components {
     # of named components in the configuration that are not actually existing (not a
     # real file).
 
-    my @injected_components = keys %{$class->config->{inject_components} ||+{}};
-    foreach my $injected_comp_name(@injected_components) {
-      my $component_class = $class->config->{inject_components}->{$injected_comp_name}->{from_component} || '';
-      if($component_class) {
-        my @roles = @{$class->config->{inject_components}->{$injected_comp_name}->{roles} ||[]};
-        my %args = %{ $class->config->{$injected_comp_name} || +{} };
+    my @injected_components = $class->setup_injected_components;
 
+    # All components are registered, now we need to 'init' them.
+    foreach my $component_name (@comps, @injected_components) {
+      $class->components->{$component_name} = $class->components->{$component_name}->() if
+        (ref($class->components->{$component_name}) || '') eq 'CODE';
+    }
+}
+
+=head2 $app->setup_injected_components
+
+Called by setup_compoents to setup components that are injected.
+
+=cut
+
+sub setup_injected_components {
+    my ($class) = @_;
+    my @injected_components = keys %{$class->config->{inject_components} ||+{}};
+
+    foreach my $injected_comp_name(@injected_components) {
+        $class->setup_injected_component(
+          $injected_comp_name,
+          $class->config->{inject_components}->{$injected_comp_name});
+    }
+
+    return @injected_components;
+}
+
+=head2 $app->setup_injected_component( $injected_component_name, $config )
+
+Setup a given injected component.
+
+=cut
+
+sub setup_injected_component {
+    my ($class, $injected_comp_name, $config) = @_;
+    if(my $component_class = $config->{from_component}) {
+        my @roles = @{$config->{roles} ||[]};
         Catalyst::Utils::inject_component(
           into => $class,
           component => $component_class,
           (scalar(@roles) ? (traits => \@roles) : ()),
           as => $injected_comp_name);
-      }
-    }
-
-    # All components are registered, now we need to 'init' them.
-    foreach my $component_name (keys %{$class->components||{}}) {
-      $class->components->{$component_name} = $class->components->{$component_name}->() if
-      (ref($class->components->{$component_name}) || '') eq 'CODE';
     }
 }
 
