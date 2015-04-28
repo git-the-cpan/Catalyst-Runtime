@@ -157,7 +157,7 @@ sub composed_stats_class {
 __PACKAGE__->_encode_check(Encode::FB_CROAK | Encode::LEAVE_SRC);
 
 # Remember to update this in Catalyst::Runtime as well!
-our $VERSION = '5.90089_003';
+our $VERSION = '5.90089_004';
 $VERSION = eval $VERSION if $VERSION =~ /_/; # numify for warning-free dev releases
 
 sub import {
@@ -198,6 +198,11 @@ sub _application { $_[0] }
 =head1 NAME
 
 Catalyst - The Elegant MVC Web Application Framework
+
+=for html
+<a href="https://badge.fury.io/pl/Catalyst-Runtime"><img src="https://badge.fury.io/pl/Catalyst-Runtime.svg" alt="CPAN version" height="18"></a>
+<a href="https://travis-ci.org/perl-catalyst/catalyst-runtime/"><img src="https://api.travis-ci.org/perl-catalyst/catalyst-runtime.png" alt="Catalyst></a>
+<a href="http://cpants.cpanauthors.org/dist/Catalyst-Runtime"><img src="http://cpants.cpanauthors.org/dist/Catalyst-Runtime.png" alt='Kwalitee Score' /></a>
 
 =head1 SYNOPSIS
 
@@ -2306,9 +2311,7 @@ sub prepare {
 
     $c->response->_context($c);
 
-    if($c->use_stats) {
-      $c->stats($class->composed_stats_class->new)->enable;
-    }
+    $c->stats($class->stats_class->new)->enable($c->use_stats);
 
     if ( $c->debug || $c->config->{enable_catalyst_header} ) {
         $c->res->headers->header( 'X-Catalyst' => $Catalyst::VERSION );
@@ -3022,8 +3025,7 @@ sub setup_component {
         return $component;
     }
 
-    my $suffix = Catalyst::Utils::class2classsuffix( $component );
-    my $config = $class->config->{ $suffix } || {};
+    my $config = $class->config_for($component);
     # Stash catalyst_component_name in the config here, so that custom COMPONENT
     # methods also pass it. local to avoid pointlessly shitting in config
     # for the debug screen, as $component is already the key name.
@@ -3059,6 +3061,33 @@ sub setup_component {
     }
 
     return $instance; 
+}
+
+=head2 $app->config_for( $component_name )
+
+Return the application level configuration (which is not yet merged with any
+local component configuration, via $component_class->config) for the named
+component or component object. Example:
+
+    MyApp->config(
+      'Model::Foo' => { a => 1, b => 2},
+    );
+
+    my $config = MyApp->config_for('MyApp::Model::Foo');
+
+In this case $config is the hashref C< {a=>1, b=>2} >.
+
+This is also handy for looking up configuration for a plugin, to make sure you follow
+existing L<Catalyst> standards for where a plugin should put its configuration.
+
+=cut
+
+sub config_for {
+    my ($class, $component_name) = @_;
+    my $component_suffix = Catalyst::Utils::class2classsuffix($component_name);
+    my $config = $class->config->{ $component_suffix } || {};
+
+    return $config;
 }
 
 =head2 $c->setup_dispatcher
