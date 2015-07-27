@@ -180,7 +180,7 @@ sub composed_stats_class {
 __PACKAGE__->_encode_check(Encode::FB_CROAK | Encode::LEAVE_SRC);
 
 # Remember to update this in Catalyst::Runtime as well!
-our $VERSION = '5.90095';
+our $VERSION = '5.90096';
 $VERSION = eval $VERSION if $VERSION =~ /_/; # numify for warning-free dev releases
 
 sub import {
@@ -1634,8 +1634,10 @@ sub uri_for {
 
     # remove and save fragment if there is one
     my $fragment;
-    if ($args =~ s/(#.+)$//) {
-      $fragment = $1;
+    if ($args =~ s/#(.+)$//) {
+      $fragment = encode_utf8($1);
+      $fragment =~ s/([^A-Za-z0-9\-_.!~*'() ])/$URI::Escape::escapes{$1}/go;
+      $fragment =~ s/ /+/g;
     }
 
     if (my @keys = keys %$params) {
@@ -1668,7 +1670,7 @@ sub uri_for {
     $args =~ s/([^$URI::uric])/$URI::Escape::escapes{$1}/go;
 
     # re-attach fragment on the end of everything after adding params
-    $query .= $fragment if $fragment;
+    $query .= "#$fragment" if $fragment;
 
     my $res = bless(\"${base}${args}${query}", $class);
     $res;
