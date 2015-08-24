@@ -43,6 +43,23 @@ BEGIN {
 }
 
 {
+  package MyApp::Role::Controller;
+  $INC{'MyApp/Role/Controller.pm'} = __FILE__;
+
+  use Moose::Role;
+  use MooseX::MethodAttributes::Role;
+  use MyApp::Types qw/Int Str/;
+
+  sub role_str :Path('role_test') Args(Str) {
+    my ($self, $c, $arg) = @_;
+    $c->res->body('role_str'.$arg);
+  }
+
+  sub role_int :Path('role_test') Args(Int) {
+    my ($self, $c, $arg) = @_;
+    $c->res->body('role_int'.$arg);
+  }
+
   package MyApp::Model::User;
   $INC{'MyApp/Model/User.pm'} = __FILE__;
 
@@ -70,6 +87,8 @@ BEGIN {
   use MyApp::Types qw/Tuple Int Str StrMatch ArrayRef UserId User Heart/;
 
   extends 'Catalyst::Controller';
+  with 'MyApp::Role::Controller';
+
 
   sub user :Local Args(UserId) {
     my ($self, $c, $int) = @_;
@@ -178,6 +197,67 @@ BEGIN {
   }
 
   MyApp::Controller::Root->config(namespace=>'');
+
+  package MyApp::Controller::Autoclean;
+  $INC{'MyApp/Controller/Autoclean.pm'} = __FILE__;
+
+  use Moose;
+  use MooseX::MethodAttributes;
+  use namespace::autoclean -except => 'Int';
+
+  use MyApp::Types qw/Int/;
+
+  extends 'Catalyst::Controller';
+
+  sub an_int :Local Args(Int) {
+    my ($self, $c, $int) = @_;
+    $c->res->body('an_int (autoclean)');
+  }
+
+  MyApp::Controller::Autoclean->config(namespace=>'autoclean');
+
+  package MyApp::Role;
+  $INC{'MyApp/Role.pm'} = __FILE__;
+
+  use Moose::Role;
+  use MooseX::MethodAttributes::Role;
+  use MyApp::Types qw/Int/;
+
+  sub an_int :Local Args(Int) {
+    my ($self, $c, $int) = @_;
+    $c->res->body('an_int (withrole)');
+  }
+
+  sub an_int_ns :Local Args(MyApp::Types::Int) {
+    my ($self, $c, $int) = @_;
+    $c->res->body('an_int (withrole)');
+  }
+
+  package MyApp::BaseController;
+  $INC{'MyApp/BaseController.pm'} = __FILE__;
+
+  use Moose;
+  use MooseX::MethodAttributes;
+  use MyApp::Types qw/Int/;
+
+  extends 'Catalyst::Controller';
+
+  sub from_parent :Local Args(Int) {
+    my ($self, $c, $id) = @_;
+    $c->res->body("from_parent $id");
+  }
+
+  package MyApp::Controller::WithRole;
+  $INC{'MyApp/Controller/WithRole.pm'} = __FILE__;
+
+  use Moose;
+  use MooseX::MethodAttributes;
+
+  extends 'MyApp::BaseController';
+
+  with 'MyApp::Role';
+
+  MyApp::Controller::WithRole->config(namespace=>'withrole');
 
   package MyApp;
   use Catalyst;
@@ -476,4 +556,41 @@ SKIP: {
 
 }
 
+# Test Roles
+
+{
+    my $res = request '/role_test/1';
+    is $res->content, 'role_int1';
+}
+
+{
+    my $res = request '/role_test/a';
+    is $res->content, 'role_stra';
+}
+
+
+{
+  my $res = request '/autoclean/an_int/1';
+  is $res->content, 'an_int (autoclean)';
+}
+
+{
+  my $res = request '/withrole/an_int_ns/S';
+  is $res->content, 'default';
+}
+
+{
+  my $res = request '/withrole/an_int_ns/111';
+  is $res->content, 'an_int (withrole)';
+}
+
+{
+  my $res = request '/withrole/an_int/1';
+  is $res->content, 'an_int (withrole)';
+}
+
+{
+  my $res = request '/withrole/from_parent/1';
+  is $res->content, 'from_parent 1';
+}
 done_testing;

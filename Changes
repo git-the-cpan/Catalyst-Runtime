@@ -1,5 +1,15 @@
 # This file documents the revision history for Perl extension Catalyst.
 
+5.90100 - 2015-08-24
+  - Document using namespace::autoclean with controllers that have actions
+    with type constraints.
+  - Look for type constraints in super classes and consumed roles.
+  - Change the way the stash middleware works to no longer localize $psgi_env.
+  - If you delegate control to a sub Catalyst application, that application
+    may now return information to the parent application via the stash.
+  - Fix for RT#106373 (Issue when you try to install and also have an old
+    version of Test::Mechanize::WWW::Catalyst)
+
 5.90097 - 2015-07-28
   - $c->uri_for now defines a final argument for setting the URL fragment
   /URL anchor.  This is now the canonical approach to setting a fragment
