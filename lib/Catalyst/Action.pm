@@ -249,19 +249,22 @@ sub resolve_type_constraint {
     return $name;
   }
 
+  # This is broken for when there is more than one constraint
   if($name=~m/::/) {
     eval "use Type::Registry; 1" || die "Can't resolve type constraint $name without installing Type::Tiny";
     my $tc =  Type::Registry->new->foreign_lookup($name);
-    return defined $tc ? $tc : die "'$name' not a type constraint in ${\$self->private_path}";
+    return defined $tc ? $tc : die "'$name' not a full namespace type constraint in ${\$self->private_path}";
   }
+  
+  my @tc = grep { defined $_ } (eval("package ${\$self->class}; $name"));
 
-  my @tc = eval "package ${\$self->class}; $name" or do {
+  unless(scalar @tc) {
     # ok... so its not defined in the package.  we need to look at all the roles
     # and superclasses, look for attributes and figure it out.
     # Superclasses take precedence;
-    #
-    my @supers = map { $_->meta } $self->class->meta->superclasses;
-    my @roles = $self->class->meta->calculate_all_roles;
+
+    my @supers = $self->class->can('meta') ? map { $_->meta } $self->class->meta->superclasses : ();
+    my @roles = $self->class->can('meta') ? $self->class->meta->calculate_all_roles : ();
 
     # So look thru all the super and roles in order and return the
     # first type constraint found. We should probably find all matching
@@ -275,15 +278,20 @@ sub resolve_type_constraint {
               @{$m->attributes};
           next unless $value eq $name;
           my @tc = eval "package ${\$parent->name}; $name";
-          return @tc if @tc;
-        }
+          if(scalar(@tc)) {
+            return map { ref($_) ? $_ : Moose::Util::TypeConstraints::find_or_parse_type_constraint($_) } @tc;
+          } else {
+            return;
+          }
+        } 
       }
     }
+    
+    my $classes = join(',', $self->class, @roles, @supers);
+    die "'$name' not a type constraint in '${\$self->private_path}', Looked in: $classes";
+  }
 
-    die "'$name' not a type constraint in ${\$self->private_path}";
-  };
-
-  if($tc[0]) {
+  if(scalar(@tc)) {
     return map { ref($_) ? $_ : Moose::Util::TypeConstraints::find_or_parse_type_constraint($_) } @tc;
   } else {
     return;

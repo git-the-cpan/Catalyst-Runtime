@@ -28,7 +28,6 @@ lib/Catalyst/ClassData.pm
 lib/Catalyst/Component.pm
 lib/Catalyst/Component/ApplicationAttribute.pm
 lib/Catalyst/Component/ContextClosure.pm
-lib/Catalyst/Component/DelayedInstance.pm
 lib/Catalyst/Contributing.pod
 lib/Catalyst/Controller.pm
 lib/Catalyst/Delta.pod
