@@ -52,7 +52,9 @@ has number_of_args => (
     if( ! exists $self->attributes->{Args} ) {
       # When 'Args' does not exist, that means we want 'any number of args'.
       return undef;
-    } elsif(!defined($self->attributes->{Args}[0])) {
+    } elsif(
+      !defined($self->attributes->{Args}[0]) || 
+      $self->attributes->{Args}[0] eq '' ) {
       # When its 'Args' that internal cue for 'unlimited'
       return undef;
     } elsif(
@@ -105,7 +107,7 @@ has number_of_args_constraints => (
         return 1; # Its a normal 1 arg type constraint.
       }
     } else {
-      # We need to loop thru and error on ref types.  We don't allow a ref type
+      # We need to loop through and error on ref types.  We don't allow a ref type
       # in the middle.
       my $total = 0;
       foreach my $tc( @{$self->args_constraints}) {
@@ -138,6 +140,7 @@ has args_constraints => (
 
     return [] unless scalar(@arg_protos);
     return [] unless defined($arg_protos[0]);
+    return [] if ($arg_protos[0] eq '' && scalar(@arg_protos) == 1);
 
     # If there is only one arg and it looks like a number
     # we assume its 'classic' and the number is the number of
@@ -190,7 +193,7 @@ has number_of_captures_constraints => (
         return 1; # Its a normal 1 arg type constraint.
       }
     } else {
-      # We need to loop thru and error on ref types.  We don't allow a ref type
+      # We need to loop through and error on ref types.  We don't allow a ref type
       # in the middle.
       my $total = 0;
       foreach my $tc( @{$self->captures_constraints}) {
@@ -266,7 +269,7 @@ sub resolve_type_constraint {
     my @supers = $self->class->can('meta') ? map { $_->meta } $self->class->meta->superclasses : ();
     my @roles = $self->class->can('meta') ? $self->class->meta->calculate_all_roles : ();
 
-    # So look thru all the super and roles in order and return the
+    # So look through all the super and roles in order and return the
     # first type constraint found. We should probably find all matching
     # type constraints and try to do some sort of resolution.
 
@@ -523,7 +526,7 @@ Does the Args match or not?
 
 =head2 resolve_type_constraint
 
-Trys to find a type constraint if you have on on a type constrained method.
+Tries to find a type constraint if you have on on a type constrained method.
 
 =head2 compare
 

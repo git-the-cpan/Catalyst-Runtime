@@ -66,6 +66,12 @@ is(
 );
 
 is(
+    Catalyst::uri_for( $context, '0#fragment', { param1 => 'value1' } )->as_string,
+    'http://127.0.0.1/foo/yada/0?param1=value1#fragment',
+    'URI for path 0 with fragment and query params 1'
+);
+
+is(
     Catalyst::uri_for( $context, '/bar#fragment^%$', { param1 => 'value1' } )->as_string,
     'http://127.0.0.1/foo/bar?param1=value1#fragment^%$',
     'URI for path with fragment and query params 3'
@@ -76,6 +82,59 @@ is(
     'http://127.0.0.1/foo/foo?param1=value1#bar/baz',
     'URI for path with fragment and query params 3'
 );
+
+is(
+    Catalyst::uri_for( 'TestApp', '/bar/baz' )->as_string,
+    '/bar/baz',
+    'URI for absolute path, called with only class name'
+);
+
+## relative action (or path) doesn't make sense when calling as class method
+# is(
+#     Catalyst::uri_for( 'TestApp', 'bar/baz' )->as_string,
+#     '/yada/bar/baz',
+#     'URI for relative path, called with only class name'
+# );
+
+is(
+    Catalyst::uri_for( 'TestApp', '/', 'arg1', 'arg2' )->as_string,
+    '/arg1/arg2',
+    'URI for root action with args, called with only class name'
+);
+
+## relative action (or path) doesn't make sense when calling as class method
+# is( Catalyst::uri_for( 'TestApp', '../quux' )->as_string,
+#     '/quux', 'URI for relative dot path, called with only class name' );
+
+is(
+    Catalyst::uri_for( 'TestApp', '/quux', { param1 => 'value1' } )->as_string,
+    '/quux?param1=value1',
+    'URI for quux action with query params, called with only class name'
+);
+
+is (Catalyst::uri_for( 'TestApp', '/bar/wibble?' )->as_string,
+   '/bar/wibble%3F', 'Question Mark gets encoded, called with only class name'
+);
+
+## relative action (or path) doesn't make sense when calling as class method
+# is( Catalyst::uri_for( 'TestApp', qw/bar wibble?/, 'with space' )->as_string,
+#     '/yada/bar/wibble%3F/with%20space', 'Space gets encoded, called with only class name'
+# );
+
+is(
+    Catalyst::uri_for( 'TestApp', '/bar', 'with+plus', { 'also' => 'with+plus' })->as_string,
+    '/bar/with+plus?also=with%2Bplus',
+    'Plus is not encoded, called with only class name'
+);
+
+TODO: {
+    local $TODO = 'broken by 5.7008';
+    is(
+        Catalyst::uri_for( $context, '/bar#fragment', { param1 => 'value1' } )->as_string,
+        'http://127.0.0.1/foo/bar?param1=value1#fragment',
+        'URI for path with fragment and query params'
+    );
+}
 
 # test with utf-8
 is(
@@ -94,7 +153,26 @@ is(
     Catalyst::uri_for( $context, 'quux', { param1 => $request->base } )->as_string,
     'http://127.0.0.1/foo/yada/quux?param1=http%3A%2F%2F127.0.0.1%2Ffoo',
     'URI for undef action with query param as object'
-);
+  );
+
+# test with empty arg
+{
+    my @warnings;
+    local $SIG{__WARN__} = sub { push @warnings, @_ };
+    is(
+       Catalyst::uri_for( $context )->as_string,
+       'http://127.0.0.1/foo/yada',
+       'URI with no action'
+      );
+
+    is(
+       Catalyst::uri_for( $context, 0 )->as_string,
+       'http://127.0.0.1/foo/yada/0',
+       'URI with 0 path'
+      );
+
+    is_deeply(\@warnings, [], "No warnings with no path argument");
+}
 
 $request->base( URI->new('http://localhost:3000/') );
 $request->match( 'orderentry/contract' );
